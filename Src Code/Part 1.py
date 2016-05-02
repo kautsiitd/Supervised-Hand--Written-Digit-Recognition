@@ -1,58 +1,71 @@
-import sys
-import os
+from __future__ import division
+import numpy as np
+import matplotlib.pyplot as plt
 import scipy.io
-import scipy.misc
-from random import shuffle
+import math
+from sklearn.cross_validation import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.metrics import accuracy_score
+from pybrain.datasets import ClassificationDataSet
 from pybrain.tools.shortcuts import buildNetwork
-from pybrain.datasets import SupervisedDataSet
 from pybrain.supervised.trainers import BackpropTrainer
-from pybrain.structure.modules import TanhLayer, SoftmaxLayer, LinearLayer, SigmoidLayer
-from pybrain.structure import FeedForwardNetwork
-from pybrain.structure import FullConnection
+from pybrain.structure.modules import SoftmaxLayer,TanhLayer
 
-# defining variables
-n_features	= 784
-n_layers	= 1
-n_output	= 1
-# network 	= buildNetwork(n_features, n_layers, n_output, bias=True, hiddenclass=TanhLayer, outclass=SoftmaxLayer)
-# dataset 	= SupervisedDataSet(n_features, n_output)
-# trainer 	= BackpropTrainer(network, dataset)
-n = FeedForwardNetwork()
-inLayer = LinearLayer(n_features)
-hiddenLayer = SigmoidLayer(n_layers)
-outLayer = LinearLayer(1)
-n.addInputModule(inLayer)
-n.addModule(hiddenLayer)
-n.addOutputModule(outLayer)
-in_to_hidden = FullConnection(inLayer, hiddenLayer)
-hidden_to_out = FullConnection(hiddenLayer, outLayer)
-n.addConnection(in_to_hidden)
-n.addConnection(hidden_to_out)
-n.sortModules()
-dataset 	= SupervisedDataSet(n_features, n_output)
+def load_dataset(dataset, X, y):
+    enc = OneHotEncoder(n_values=10)
+    yenc = enc.fit_transform(np.matrix(y)).todense()
+    for i in range(y.shape[0]):
+        dataset.addSample(X[i, :], yenc[i][0])
 
-# loading dataset
-mat 	= scipy.io.loadmat('../dataset/2012ME20780.mat')
-data 	= mat["data_image" ]
-labels 	= mat["data_labels"]
-mat     = zip(data,labels)
-shuffle(mat)
-data	= zip(*mat)[0]
-labels  = zip(*mat)[1]
-	# seprating test and train data
-train_d = data  [:1200]
-train_l = labels[:1200]
-test_d  = data  [1200:]
-test_l  = labels[1200:]
+NUM_EPOCHS = 10
+NUM_HIDDEN_UNITS = 25
 
-# creating train dataset and training
-for i,j in zip(train_d,train_l):
-	dataset.addSample(i,(j,))
-print "done"
-trainer 	= BackpropTrainer(n, dataset)
-trainer.train()
-# trainer.trainUntilConvergence(verbose = True)
+print "Loading MATLAB data..."    
+data = scipy.io.loadmat("../dataset/2012ME20780.mat")
+X = data["data_image"]
+y = data["data_labels"]
+n_features = X.shape[1]
+n_classes = len(np.unique(y))
 
-# predicting on test dataset
-for i in test_d:
-	print n.activate(tuple(i))
+# visualize data
+# get 100 rows of the input at random
+print "Visualize data..."
+idxs = np.random.randint(X.shape[0], size=100)
+fig, ax = plt.subplots(10, 10)
+img_size = math.sqrt(n_features)
+for i in range(10):
+    for j in range(10):
+        Xi = X[idxs[i * 10 + j], :].reshape(img_size, img_size).T
+        ax[i, j].set_axis_off()
+        ax[i, j].imshow(Xi, aspect="auto", cmap="gray")
+plt.show()
+
+# split up training data for cross validation
+print "Split data into training and test sets..."
+Xtrain, Xtest, ytrain, ytest = train_test_split(X, y, test_size=0.25, 
+                                                random_state=42)
+ds_train = ClassificationDataSet(X.shape[1], 10)
+load_dataset(ds_train, Xtrain, ytrain)
+
+# build a 400 x 25 x 10 Neural Network
+print "Building %d x %d x %d neural network..." % (n_features, NUM_HIDDEN_UNITS, n_classes)
+fnn = buildNetwork(n_features, NUM_HIDDEN_UNITS, n_classes, bias=True, 
+                   hiddenclass=TanhLayer, outclass=SoftmaxLayer)
+print fnn
+
+# train network
+print "Training network..."
+trainer = BackpropTrainer(fnn, ds_train)
+for i in range(NUM_EPOCHS):
+    error = trainer.train()
+    print "Epoch: %d, Error: %7.4f" % (i, error)
+    
+# predict using test data
+print "Making predictions..."
+ypreds = []
+ytrues = []
+for i in range(Xtest.shape[0]):
+    pred = fnn.activate(Xtest[i, :])
+    ypreds.append(pred.argmax())
+    ytrues.append(ytest[i])
+print "Accuracy on test set: %7.4f" % accuracy_score(ytrues, ypreds, normalize=True)
